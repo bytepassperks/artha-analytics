@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "Artha Analytics (Metabase)"
+exit 0
