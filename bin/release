@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-cat <<YAML
----
-default_process_types:
-  web: bash run.sh
-YAML
