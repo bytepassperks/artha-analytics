@@ -11,13 +11,23 @@ PROXY_PORT = int(os.environ.get("PORT", "3000"))
 
 INJECT_SCRIPT = b"""<script>
 (function(){
-  try{var e=document.getElementById('_metabaseBootstrap');
-  if(e){var d=JSON.parse(e.textContent);
-  d['help-link']='hidden';d['show-metabase-links']=false;
-  d['application-name']='Artha Analytics';
-  d['token-features']=Object.assign(d['token-features']||{},{whitelabel:true});
-  e.textContent=JSON.stringify(d)}}catch(x){}
-  document.title='Artha Analytics';
+  try{
+    if(window.MetabaseBootstrap){
+      window.MetabaseBootstrap['help-link']='hidden';
+      window.MetabaseBootstrap['show-metabase-links']=false;
+      window.MetabaseBootstrap['application-name']='Artha Analytics';
+      if(window.MetabaseBootstrap['token-features']){
+        window.MetabaseBootstrap['token-features']['whitelabel']=true;
+      }
+    }
+    var e=document.getElementById('_metabaseBootstrap');
+    if(e){var d=JSON.parse(e.textContent);
+    d['help-link']='hidden';d['show-metabase-links']=false;
+    d['application-name']='Artha Analytics';
+    d['token-features']=Object.assign(d['token-features']||{},{whitelabel:true});
+    e.textContent=JSON.stringify(d)}
+  }catch(x){}
+  document.title=document.title.replace('Metabase','Artha Analytics');
   var _f=window.fetch;
   window.fetch=function(){return _f.apply(this,arguments).then(function(r){
   if(r.url&&r.url.indexOf('/api/session/properties')!==-1){
