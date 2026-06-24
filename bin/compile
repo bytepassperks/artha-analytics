@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -e
+BUILD_DIR="$1"
+CACHE_DIR="$2"
+
+# Install JVM first (borrowed from Scalingo's JVM buildpack)
+JDK_URL="https://cdn.azul.com/zulu/bin/zulu21.40.17-ca-jdk21.0.6-linux_x64.tar.gz"
+
+echo "-----> Installing JDK 21"
+if [ -d "$CACHE_DIR/.jdk" ]; then
+  echo "       Using cached JDK"
+  cp -a "$CACHE_DIR/.jdk" "$BUILD_DIR/.jdk"
+else
+  echo "       Downloading JDK..."
+  mkdir -p /tmp/jdk-install
+  curl -fsSL "$JDK_URL" | tar xz -C /tmp/jdk-install --strip-components=1
+  mv /tmp/jdk-install "$BUILD_DIR/.jdk"
+  cp -a "$BUILD_DIR/.jdk" "$CACHE_DIR/.jdk"
+fi
+
+export PATH="$BUILD_DIR/.jdk/bin:$PATH"
+export JAVA_HOME="$BUILD_DIR/.jdk"
+java -version 2>&1 | head -1
+
+# Download Metabase
+MB_VERSION="${MB_VERSION:-v0.62.2}"
+JAR_URL="https://downloads.metabase.com/${MB_VERSION}/metabase.jar"
+JAR="$BUILD_DIR/metabase.jar"
+
+echo "-----> Installing Metabase ${MB_VERSION}"
+if [ -f "$CACHE_DIR/metabase-${MB_VERSION}.jar" ]; then
+  echo "       Using cached JAR"
+  cp "$CACHE_DIR/metabase-${MB_VERSION}.jar" "$JAR"
+else
+  echo "       Downloading from $JAR_URL (this takes a few minutes)..."
+  curl -fsSL --retry 3 -o "$JAR" "$JAR_URL"
+  cp "$JAR" "$CACHE_DIR/metabase-${MB_VERSION}.jar"
+fi
+
+echo "-----> Applying Artha Analytics branding patches"
+
+# Extract frontend files
+mkdir -p /tmp/mb-patch
+cd /tmp/mb-patch
+"$BUILD_DIR/.jdk/bin/jar" xf "$JAR" frontend_client/app/dist/
+
+# Patch defaults in app-main JS
+MAIN_JS=$(find frontend_client/app/dist -name "app-main.*.js" 2>/dev/null | head -1)
+if [ -n "$MAIN_JS" ]; then
+  echo "       Patching $MAIN_JS"
+  sed -i 's/"help-link":"metabase"/"help-link":"hidden"/g' "$MAIN_JS"
+  sed -i 's/"show-metabase-links":!0/"show-metabase-links":!1/g' "$MAIN_JS"
+fi
+
+# Patch metabase.com/learn links
+for f in frontend_client/app/dist/*.js; do
+  if grep -q 'metabase\.com/learn' "$f" 2>/dev/null; then
+    sed -i 's|metabase\.com/learn|arthasuite.com/docs|g' "$f"
+    echo "       Patched learn links in $(basename $f)"
+  fi
+done
+
+# Update JAR
+"$BUILD_DIR/.jdk/bin/jar" uf "$JAR" frontend_client/
+cd /
+rm -rf /tmp/mb-patch
+
+echo "-----> Artha Analytics patches applied"
+
+# Create .profile.d for runtime PATH
+mkdir -p "$BUILD_DIR/.profile.d"
+echo 'export PATH="$HOME/.jdk/bin:$PATH"' > "$BUILD_DIR/.profile.d/jdk.sh"
+echo 'export JAVA_HOME="$HOME/.jdk"' >> "$BUILD_DIR/.profile.d/jdk.sh"

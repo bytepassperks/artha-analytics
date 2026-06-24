@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Always detect - we install Java and Metabase
+echo "Artha Analytics (Metabase)"
+exit 0
