@@ -3,7 +3,7 @@ set -e
 BUILD_DIR="$1"
 CACHE_DIR="$2"
 
-# Install JVM first (borrowed from Scalingo's JVM buildpack)
+# Install JDK first
 JDK_URL="https://cdn.azul.com/zulu/bin/zulu21.40.17-ca-jdk21.0.6-linux_x64.tar.gz"
 
 echo "-----> Installing JDK 21"
@@ -42,7 +42,7 @@ echo "-----> Applying Artha Analytics branding patches"
 # Extract frontend files
 mkdir -p /tmp/mb-patch
 cd /tmp/mb-patch
-"$BUILD_DIR/.jdk/bin/jar" xf "$JAR" frontend_client/app/dist/
+"$BUILD_DIR/.jdk/bin/jar" xf "$JAR" frontend_client/
 
 # Patch defaults in app-main JS
 MAIN_JS=$(find frontend_client/app/dist -name "app-main.*.js" 2>/dev/null | head -1)
@@ -52,11 +52,23 @@ if [ -n "$MAIN_JS" ]; then
   sed -i 's/"show-metabase-links":!0/"show-metabase-links":!1/g' "$MAIN_JS"
 fi
 
-# Patch metabase.com/learn links
+# Patch metabase.com/learn links in all JS files
 for f in frontend_client/app/dist/*.js; do
   if grep -q 'metabase\.com/learn' "$f" 2>/dev/null; then
     sed -i 's|metabase\.com/learn|arthasuite.com/docs|g' "$f"
     echo "       Patched learn links in $(basename $f)"
+  fi
+done
+
+# Inject branding override script into HTML templates
+# This script intercepts the API response and overrides settings
+# that the OSS version doesn't allow changing via admin panel
+INJECT_SCRIPT='<script>(function(){try{var e=document.getElementById("_metabaseBootstrap");if(e){var d=JSON.parse(e.textContent);d["help-link"]="hidden";d["show-metabase-links"]=false;d["application-name"]="Artha Analytics";e.textContent=JSON.stringify(d)}}catch(x){}var f=window.fetch;window.fetch=function(){return f.apply(this,arguments).then(function(r){if(r.url&&r.url.indexOf("/api/session/properties")!==-1){return r.json().then(function(d){d["help-link"]="hidden";d["show-metabase-links"]=false;d["application-name"]="Artha Analytics";return new Response(JSON.stringify(d),{status:r.status,statusText:r.statusText,headers:r.headers})})}return r})}})()</script>'
+
+for tmpl in frontend_client/index_template.html frontend_client/public.html; do
+  if [ -f "$tmpl" ]; then
+    sed -i "s|</head>|${INJECT_SCRIPT}</head>|" "$tmpl"
+    echo "       Injected branding script into $(basename $tmpl)"
   fi
 done
 
@@ -66,6 +78,10 @@ cd /
 rm -rf /tmp/mb-patch
 
 echo "-----> Artha Analytics patches applied"
+echo "       help-link: hidden"
+echo "       show-metabase-links: false"
+echo "       learn links: redirected to arthasuite.com"
+echo "       HTML templates: patched with branding override"
 
 # Create .profile.d for runtime PATH
 mkdir -p "$BUILD_DIR/.profile.d"
