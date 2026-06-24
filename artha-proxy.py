@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """Artha Analytics reverse proxy — injects branding overrides into Metabase HTML."""
 import http.server
-import urllib.request
-import urllib.error
+import http.client
 import os
-import re
-import sys
+import gzip
+import io
 
 METABASE_PORT = 3001
 PROXY_PORT = int(os.environ.get("PORT", "3000"))
 
-INJECT_SCRIPT = """<script>
+INJECT_SCRIPT = b"""<script>
 (function(){
   try{var e=document.getElementById('_metabaseBootstrap');
   if(e){var d=JSON.parse(e.textContent);
@@ -33,37 +32,47 @@ INJECT_SCRIPT = """<script>
 
 class ProxyHandler(http.server.BaseHTTPRequestHandler):
     def do_proxy(self):
-        url = f"http://127.0.0.1:{METABASE_PORT}{self.path}"
-        headers = {k: v for k, v in self.headers.items()
-                   if k.lower() not in ("host", "transfer-encoding")}
+        conn = http.client.HTTPConnection("127.0.0.1", METABASE_PORT, timeout=300)
         body = None
         if "Content-Length" in self.headers:
             body = self.rfile.read(int(self.headers["Content-Length"]))
-        req = urllib.request.Request(url, data=body, headers=headers, method=self.command)
+
+        # Forward headers, force identity encoding so we get uncompressed data
+        fwd = {}
+        for k, v in self.headers.items():
+            lk = k.lower()
+            if lk not in ("host", "transfer-encoding", "accept-encoding"):
+                fwd[k] = v
+        fwd["Accept-Encoding"] = "identity"
+
         try:
-            resp = urllib.request.urlopen(req, timeout=300)
-        except urllib.error.HTTPError as e:
-            resp = e
+            conn.request(self.command, self.path, body=body, headers=fwd)
+            resp = conn.getresponse()
         except Exception as e:
             self.send_error(502, str(e))
             return
 
+        data = resp.read()
+        ct = ""
+        skip = {"transfer-encoding", "content-encoding", "content-length",
+                "content-security-policy", "content-security-policy-report-only"}
+
         self.send_response(resp.status)
-        ct = resp.headers.get("Content-Type", "")
-        is_html = "text/html" in ct
-        skip_headers = {"transfer-encoding", "content-encoding", "content-length",
-                        "content-security-policy", "content-security-policy-report-only"}
-        for k, v in resp.headers.items():
-            if k.lower() not in skip_headers:
+        for k, v in resp.getheaders():
+            lk = k.lower()
+            if lk == "content-type":
+                ct = v
+            if lk not in skip:
                 self.send_header(k, v)
 
-        data = resp.read()
-        if is_html and b"</head>" in data:
-            data = data.replace(b"</head>", INJECT_SCRIPT.encode() + b"</head>", 1)
+        # Inject script into HTML responses
+        if "text/html" in ct and b"</head>" in data:
+            data = data.replace(b"</head>", INJECT_SCRIPT + b"</head>", 1)
 
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+        conn.close()
 
     do_GET = do_proxy
     do_POST = do_proxy
@@ -71,10 +80,28 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
     do_DELETE = do_proxy
     do_PATCH = do_proxy
     do_OPTIONS = do_proxy
-    do_HEAD = do_proxy
 
-    def log_message(self, format, *args):
-        pass  # suppress noisy logging
+    def do_HEAD(self):
+        conn = http.client.HTTPConnection("127.0.0.1", METABASE_PORT, timeout=300)
+        fwd = {}
+        for k, v in self.headers.items():
+            lk = k.lower()
+            if lk not in ("host", "transfer-encoding"):
+                fwd[k] = v
+        try:
+            conn.request("HEAD", self.path, headers=fwd)
+            resp = conn.getresponse()
+        except Exception as e:
+            self.send_error(502, str(e))
+            return
+        self.send_response(resp.status)
+        for k, v in resp.getheaders():
+            self.send_header(k, v)
+        self.end_headers()
+        conn.close()
+
+    def log_message(self, fmt, *args):
+        pass
 
 
 if __name__ == "__main__":
