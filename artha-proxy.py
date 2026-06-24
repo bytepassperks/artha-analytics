@@ -97,6 +97,17 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         if "text/html" in ct and b"</head>" in data:
             data = data.replace(b"</head>", INJECT_SCRIPT + b"</head>", 1)
 
+        # Patch hardcoded OSS plugin stubs in JS bundles
+        if ("javascript" in ct or "application/x-javascript" in ct) and b"getApplicationName" in data:
+            data = data.replace(
+                b'getApplicationName:e=>"Metabase"',
+                b'getApplicationName:e=>"Artha Analytics"'
+            )
+            data = data.replace(
+                b'getShowMetabaseLinks:e=>!0',
+                b'getShowMetabaseLinks:e=>!1'
+            )
+
         # Patch /api/session/properties JSON response
         if "/api/session/properties" in self.path and "application/json" in ct:
             try:
