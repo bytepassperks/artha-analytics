@@ -60,15 +60,35 @@ for f in frontend_client/app/dist/*.js; do
   fi
 done
 
-# Inject branding override script into HTML templates
-# This script intercepts the API response and overrides settings
-# that the OSS version doesn't allow changing via admin panel
-INJECT_SCRIPT='<script>(function(){try{var e=document.getElementById("_metabaseBootstrap");if(e){var d=JSON.parse(e.textContent);d["help-link"]="hidden";d["show-metabase-links"]=false;d["application-name"]="Artha Analytics";e.textContent=JSON.stringify(d)}}catch(x){}var f=window.fetch;window.fetch=function(){return f.apply(this,arguments).then(function(r){if(r.url&&r.url.indexOf("/api/session/properties")!==-1){return r.json().then(function(d){d["help-link"]="hidden";d["show-metabase-links"]=false;d["application-name"]="Artha Analytics";return new Response(JSON.stringify(d),{status:r.status,statusText:r.statusText,headers:r.headers})})}return r})}})()</script>'
-
+# Inject branding override script into HTML templates using Python
+# (sed breaks on the special characters in the JS snippet)
 for tmpl in frontend_client/index_template.html frontend_client/public.html; do
   if [ -f "$tmpl" ]; then
-    sed -i "s|</head>|${INJECT_SCRIPT}</head>|" "$tmpl"
-    echo "       Injected branding script into $(basename $tmpl)"
+    python3 -c "
+import sys
+with open('$tmpl','r') as f: c=f.read()
+s='''<script>
+(function(){
+  try{var e=document.getElementById('_metabaseBootstrap');
+  if(e){var d=JSON.parse(e.textContent);
+  d['help-link']='hidden';d['show-metabase-links']=false;
+  d['application-name']='Artha Analytics';
+  e.textContent=JSON.stringify(d)}}catch(x){}
+  var _f=window.fetch;
+  window.fetch=function(){return _f.apply(this,arguments).then(function(r){
+  if(r.url&&r.url.indexOf('/api/session/properties')!==-1){
+  return r.clone().json().then(function(d){d['help-link']='hidden';
+  d['show-metabase-links']=false;d['application-name']='Artha Analytics';
+  return new Response(JSON.stringify(d),{status:r.status,statusText:r.statusText,headers:r.headers})})}
+  return r})}
+})();
+</script>
+'''
+c=c.replace('</head>',s+'</head>',1)
+c=c.replace('<title>{{{applicationName}}}</title>','<title>Artha Analytics</title>')
+with open('$tmpl','w') as f: f.write(c)
+print('       Injected branding script into $(basename $tmpl)')
+"
   fi
 done
 
