@@ -79,6 +79,20 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         if "text/html" in ct and b"</head>" in data:
             data = data.replace(b"</head>", INJECT_SCRIPT + b"</head>", 1)
 
+        # Patch /api/session/properties JSON response
+        if "/api/session/properties" in self.path and "application/json" in ct:
+            try:
+                import json
+                d = json.loads(data)
+                d["help-link"] = "hidden"
+                d["show-metabase-links"] = False
+                d["application-name"] = "Artha Analytics"
+                if "token-features" in d:
+                    d["token-features"]["whitelabel"] = True
+                data = json.dumps(d).encode()
+            except Exception:
+                pass
+
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
