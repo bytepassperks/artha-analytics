@@ -75,7 +75,25 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             if lk not in skip:
                 self.send_header(k, v)
 
-        # Inject script into HTML responses
+        # Patch the inline bootstrap JSON in HTML before React reads it
+        if "text/html" in ct and b"_metabaseBootstrap" in data:
+            try:
+                import json as _json
+                import re as _re
+                m = _re.search(rb'id="_metabaseBootstrap">\s*(.*?)\s*</script>', data, _re.DOTALL)
+                if m:
+                    bdata = _json.loads(m.group(1))
+                    bdata["help-link"] = "hidden"
+                    bdata["show-metabase-links"] = False
+                    bdata["application-name"] = "Artha Analytics"
+                    if "token-features" in bdata:
+                        bdata["token-features"]["whitelabel"] = True
+                    new_json = _json.dumps(bdata)
+                    data = data[:m.start(1)] + new_json.encode() + data[m.end(1):]
+            except Exception:
+                pass
+
+        # Also inject our branding script for runtime overrides
         if "text/html" in ct and b"</head>" in data:
             data = data.replace(b"</head>", INJECT_SCRIPT + b"</head>", 1)
 
